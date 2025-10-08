@@ -3,63 +3,29 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-// Load environment variables FIRST
+// Load environment variables
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Debug: Check if env vars are loaded
-console.log('Environment Variables:', {
-    MONGO_URI: process.env.MONGO_URI ? 'Loaded' : 'Missing',
-    PORT: process.env.PORT
-});
-
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection with better error handling
-const MONGODB_URI = process.env.MONGO_URI;
+// MongoDB connection
+const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!MONGODB_URI) {
-    console.error('❌ MONGODB_URI is not defined in environment variables');
-    process.exit(1);
+    console.error('MONGODB_URI is missing');
 }
 
-console.log('Connecting to MongoDB Atlas...');
-
-// MongoDB connection options
-const mongooseOptions = {
+mongoose.connect(MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
-    retryWrites: true,
-    w: 'majority'
-};
-
-mongoose.connect(MONGODB_URI, mongooseOptions)
-    .then(() => console.log('✅ Connected to MongoDB Atlas successfully'))
-    .catch(err => {
-        console.error('❌ MongoDB connection error:', err.message);
-        console.log('Please check:');
-        console.log('1. Your MongoDB Atlas connection string');
-        console.log('2. Your IP is whitelisted in MongoDB Atlas');
-        console.log('3. Your database user credentials are correct');
-        process.exit(1);
-    });
-
-// MongoDB connection events
-mongoose.connection.on('error', err => {
-    console.error('❌ MongoDB connection error:', err);
-});
-
-mongoose.connection.on('disconnected', () => {
-    console.log('⚠️ MongoDB disconnected');
-});
-
-mongoose.connection.on('connected', () => {
-    console.log('✅ MongoDB connected');
-});
+})
+    .then(() => console.log('✅ Connected to MongoDB Atlas'))
+    .catch(err => console.error('❌ MongoDB connection error:', err));
 
 // Booking Schema
 const bookingSchema = new mongoose.Schema({
@@ -73,9 +39,7 @@ const bookingSchema = new mongoose.Schema({
 
 const Booking = mongoose.model('Booking', bookingSchema);
 
-// Routes
-
-// Health check endpoint
+// Routes (keep your existing routes exactly as they are)
 app.get('/api/health', (req, res) => {
     const dbStatus = mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected';
     res.json({
@@ -85,7 +49,6 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Get all bookings (for admin)
 app.get('/api/bookings', async (req, res) => {
     try {
         const bookings = await Booking.find().sort({ createdAt: -1 });
@@ -96,7 +59,6 @@ app.get('/api/bookings', async (req, res) => {
     }
 });
 
-// Get approved bookings (for users)
 app.get('/api/bookings/approved', async (req, res) => {
     try {
         const bookings = await Booking.find({ status: 'approved' }).sort({ bookingTime: 1 });
@@ -107,29 +69,18 @@ app.get('/api/bookings/approved', async (req, res) => {
     }
 });
 
-// Create new booking
 app.post('/api/bookings', async (req, res) => {
     try {
         const { name, purpose, bookingTime, returnTime } = req.body;
 
-        console.log('Received booking request:', { name, purpose, bookingTime, returnTime });
-
-        // Validate required fields
         if (!name || !purpose || !bookingTime || !returnTime) {
             return res.status(400).json({
-                message: 'All fields are required: name, purpose, bookingTime, returnTime'
+                message: 'All fields are required'
             });
         }
 
-        // Validate dates
         const bookingDateTime = new Date(bookingTime);
         const returnDateTime = new Date(returnTime);
-
-        if (isNaN(bookingDateTime.getTime()) || isNaN(returnDateTime.getTime())) {
-            return res.status(400).json({
-                message: 'Invalid date format for bookingTime or returnTime'
-            });
-        }
 
         if (bookingDateTime >= returnDateTime) {
             return res.status(400).json({
@@ -137,7 +88,6 @@ app.post('/api/bookings', async (req, res) => {
             });
         }
 
-        // Check for time conflicts with approved bookings
         const conflictingBooking = await Booking.findOne({
             status: 'approved',
             $or: [
@@ -150,7 +100,7 @@ app.post('/api/bookings', async (req, res) => {
 
         if (conflictingBooking) {
             return res.status(400).json({
-                message: `Time conflict with existing booking from ${conflictingBooking.bookingTime} to ${conflictingBooking.returnTime}`
+                message: 'Time slot conflict with existing booking'
             });
         }
 
@@ -162,7 +112,6 @@ app.post('/api/bookings', async (req, res) => {
         });
 
         const newBooking = await booking.save();
-        console.log('Booking created successfully:', newBooking._id);
         res.status(201).json(newBooking);
     } catch (error) {
         console.error('Error creating booking:', error);
@@ -170,7 +119,6 @@ app.post('/api/bookings', async (req, res) => {
     }
 });
 
-// Update booking status
 app.patch('/api/bookings/:id', async (req, res) => {
     try {
         const { status } = req.body;
@@ -196,7 +144,6 @@ app.patch('/api/bookings/:id', async (req, res) => {
     }
 });
 
-// Delete booking
 app.delete('/api/bookings/:id', async (req, res) => {
     try {
         const booking = await Booking.findByIdAndDelete(req.params.id);
@@ -210,19 +157,12 @@ app.delete('/api/bookings/:id', async (req, res) => {
     }
 });
 
-// Test endpoint to check if server is working
-app.get('/', (req, res) => {
-    res.json({
-        message: 'Motorbike Booking API is running!',
-        endpoints: {
-            health: '/api/health',
-            bookings: '/api/bookings',
-            approvedBookings: '/api/bookings/approved'
-        }
-    });
-});
+// Export for Vercel
+export default app;
 
-app.listen(PORT, () => {
-    console.log(`🚀 Server is running on port ${PORT}`);
-    console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-});
+// Only listen locally, not on Vercel
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    });
+}
