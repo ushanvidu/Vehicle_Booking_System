@@ -20,12 +20,45 @@ if (!MONGODB_URI) {
     console.error('MONGODB_URI is missing');
 }
 
-mongoose.connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-    .then(() => console.log('✅ Connected to MongoDB Atlas'))
-    .catch(err => console.error('❌ MongoDB connection error:', err));
+let isConnecting = false;
+async function connectToDatabaseOnce() {
+    if (!MONGODB_URI) {
+        return;
+    }
+    // 1 = connected, 2 = connecting
+    if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2 || isConnecting) {
+        return;
+    }
+    isConnecting = true;
+    try {
+        await mongoose.connect(MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+        });
+        console.log('✅ Connected to MongoDB Atlas');
+    } catch (err) {
+        console.error('❌ MongoDB connection error:', err);
+        throw err;
+    } finally {
+        isConnecting = false;
+    }
+}
+
+// Lazy-connect middleware for serverless: skip health check
+app.use(async (req, res, next) => {
+    if (req.path === '/api/health') {
+        return next();
+    }
+    if (!MONGODB_URI) {
+        return res.status(500).json({ message: 'Server misconfigured: MONGODB_URI is missing' });
+    }
+    try {
+        await connectToDatabaseOnce();
+        return next();
+    } catch (err) {
+        return res.status(500).json({ message: 'Database connection failed' });
+    }
+});
 
 // Booking Schema
 const bookingSchema = new mongoose.Schema({
